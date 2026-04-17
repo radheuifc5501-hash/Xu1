@@ -8,9 +8,15 @@ if (typeof global.Buffer === 'undefined') {
 
 // Configure @noble/ed25519 sha512 for React Native (crypto.subtle is not available in RN)
 const { sha512 } = require('@noble/hashes/sha2');
-const { hashes } = require('@noble/ed25519');
-hashes.sha512 = (msg) => sha512(msg);
-hashes.sha512Async = async (msg) => sha512(msg);
+try {
+  const ed = require('@noble/ed25519');
+  if (ed.etc) {
+    ed.etc.sha512Sync = (msg) => sha512(msg);
+    ed.etc.sha512Async = async (msg) => sha512(msg);
+  }
+} catch (e) {
+  // @noble/ed25519 sha512 hook setup failed; continue without crashing startup
+}
 
 // Load the Expo Router entry point last
 require('expo-router/entry');

@@ -6,6 +6,9 @@
     "orientation": "portrait",
     "scheme": "xuwallet",
     "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0F0E17"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.xuwallet.app",
