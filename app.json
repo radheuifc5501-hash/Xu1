@@ -4,6 +4,9 @@
     "slug": "xu-wallet",
     "version": "1.0.0",
     "orientation": "portrait",
+    "splash": {
+      "backgroundColor": "#0F0E17"
+    },
     "scheme": "xuwallet",
     "userInterfaceStyle": "dark",
     "ios": {
