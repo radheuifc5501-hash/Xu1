@@ -5,6 +5,11 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
+
+try {
+  SplashScreen.preventAutoHideAsync();
+} catch {}
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -42,6 +47,21 @@ const errStyles = StyleSheet.create({
   title: { color: '#FF4444', fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
   message: { color: '#FFFFFF', fontSize: 14, marginBottom: 12 },
   stack: { color: '#AAAAAA', fontSize: 11 },
+  boot: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    padding: 6,
+    backgroundColor: '#6C4CF1',
+    zIndex: 9999,
+  },
+  bootText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
 });
 
 function NavigationGuard() {
@@ -99,16 +119,36 @@ function AppStack() {
 
 export default function RootLayout() {
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [bootStage, setBootStage] = useState<string>('layout-mounted');
 
   useEffect(() => {
-    const prev = (ErrorUtils as any).getGlobalHandler();
-    (ErrorUtils as any).setGlobalHandler((err: Error, isFatal: boolean) => {
-      setGlobalError(`[${isFatal ? 'FATAL' : 'ERROR'}] ${err?.message}\n\n${err?.stack}`);
-      if (prev) prev(err, isFatal);
-    });
-    return () => {
-      (ErrorUtils as any).setGlobalHandler(prev);
-    };
+    setBootStage('layout-effect');
+    try {
+      const EU = (globalThis as any).ErrorUtils;
+      if (EU && typeof EU.getGlobalHandler === 'function') {
+        const prev = EU.getGlobalHandler();
+        EU.setGlobalHandler((err: Error, isFatal: boolean) => {
+          setGlobalError(`[${isFatal ? 'FATAL' : 'ERROR'}] ${err?.message}\n\n${err?.stack}`);
+          if (prev) prev(err, isFatal);
+        });
+        return () => {
+          try { EU.setGlobalHandler(prev); } catch {}
+        };
+      }
+    } catch (e: any) {
+      setGlobalError(`[ErrorUtils-setup] ${e?.message}`);
+    }
+    return undefined;
+  }, []);
+
+  // Force-hide the native splash after a short delay so the user never sits
+  // on a black splash if the app is taking time to boot.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+      setBootStage('splash-hidden');
+    }, 300);
+    return () => clearTimeout(t);
   }, []);
 
   if (globalError) {
@@ -124,8 +164,11 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0E17' }}>
         <SafeAreaProvider>
+          <View style={errStyles.boot} pointerEvents="none">
+            <Text style={errStyles.bootText}>XU · {bootStage}</Text>
+          </View>
           <WalletProvider>
             <StatusBar style="light" />
             <AppStack />
