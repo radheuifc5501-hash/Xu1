@@ -11,10 +11,21 @@ try {
     global.Buffer = Buffer;
   }
 
-  // Configure @noble/ed25519 sha512 for React Native (crypto.subtle is not
-  // available in RN).
+  // Configure @noble/ed25519 sha512 for React Native. Hermes has no
+  // `crypto.subtle`, so without this the library falls back to SubtleCrypto
+  // and throws "crypto.subtle must be defined, consider polyfill" the first
+  // time anything tries to derive a Solana public key.
+  //
+  // v3 switched the config surface from `etc.sha512Sync` to `hashes.sha512`
+  // (both the sync and async slots). We set both to the @noble/hashes pure
+  // JS implementation and also keep the v2 `etc.*` entries wired up so code
+  // paths that still look for them keep working.
   const { sha512 } = require('@noble/hashes/sha2');
   const ed = require('@noble/ed25519');
+  if (ed.hashes) {
+    ed.hashes.sha512 = (msg) => sha512(msg);
+    ed.hashes.sha512Async = async (msg) => sha512(msg);
+  }
   if (ed.etc) {
     ed.etc.sha512Sync = (msg) => sha512(msg);
     ed.etc.sha512Async = async (msg) => sha512(msg);
