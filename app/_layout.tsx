@@ -5,6 +5,11 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
+
+try {
+  SplashScreen.preventAutoHideAsync();
+} catch {}
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -101,14 +106,31 @@ export default function RootLayout() {
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   useEffect(() => {
-    const prev = (ErrorUtils as any).getGlobalHandler();
-    (ErrorUtils as any).setGlobalHandler((err: Error, isFatal: boolean) => {
-      setGlobalError(`[${isFatal ? 'FATAL' : 'ERROR'}] ${err?.message}\n\n${err?.stack}`);
-      if (prev) prev(err, isFatal);
-    });
-    return () => {
-      (ErrorUtils as any).setGlobalHandler(prev);
-    };
+    try {
+      const EU = (globalThis as any).ErrorUtils;
+      if (EU && typeof EU.getGlobalHandler === 'function') {
+        const prev = EU.getGlobalHandler();
+        EU.setGlobalHandler((err: Error, isFatal: boolean) => {
+          setGlobalError(`[${isFatal ? 'FATAL' : 'ERROR'}] ${err?.message}\n\n${err?.stack}`);
+          if (prev) prev(err, isFatal);
+        });
+        return () => {
+          try { EU.setGlobalHandler(prev); } catch {}
+        };
+      }
+    } catch (e: any) {
+      setGlobalError(`[ErrorUtils-setup] ${e?.message}`);
+    }
+    return undefined;
+  }, []);
+
+  // Force-hide the native splash after a short delay so the user never sits
+  // on a black splash if the app is taking time to boot.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
   }, []);
 
   if (globalError) {
@@ -124,7 +146,7 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0E17' }}>
         <SafeAreaProvider>
           <WalletProvider>
             <StatusBar style="light" />

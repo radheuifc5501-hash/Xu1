@@ -4,6 +4,9 @@
     "slug": "xu-wallet",
     "version": "1.0.0",
     "orientation": "portrait",
+    "splash": {
+      "backgroundColor": "#0F0E17"
+    },
     "scheme": "xuwallet",
     "userInterfaceStyle": "dark",
     "ios": {
@@ -16,6 +19,7 @@
     },
     "android": {
       "package": "com.xuwallet.app",
+      "versionCode": 4,
       "adaptiveIcon": {
         "backgroundColor": "#0F0E17"
       },
@@ -43,7 +47,9 @@
       "typedRoutes": true
     },
     "extra": {
-      "router": {},
+      "router": {
+        "root": "./app"
+      },
       "eas": {
         "projectId": "9e96fad3-bc39-49d9-b5a7-ae16531c425c"
       }
