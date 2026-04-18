@@ -66,8 +66,26 @@ function NavigationGuard() {
       router.replace('/onboarding');
     } else if (isWalletCreated && isLocked && !inPinLock) {
       router.replace('/pin-lock');
-    } else if (isWalletCreated && !isLocked && (inPinLock || (!inTabs && !inAuthFlow && s0 !== 'send' && s0 !== 'receive' && s0 !== 'export-seed' && s0 !== 'change-pin'))) {
-      router.replace('/(tabs)/home');
+    } else {
+      // Root-level routes that are allowed to render on top of the tabs
+      // stack. Anything not in this list (and not the (tabs) group itself)
+      // gets bounced to the home tab. Forgetting one here is why the
+      // History button silently navigated nowhere.
+      const rootModalRoutes = new Set([
+        'send',
+        'receive',
+        'history',
+        'export-seed',
+        'change-pin',
+      ]);
+      const inAllowedRoot = s0 !== undefined && rootModalRoutes.has(s0);
+      if (
+        isWalletCreated &&
+        !isLocked &&
+        (inPinLock || (!inTabs && !inAuthFlow && !inAllowedRoot))
+      ) {
+        router.replace('/(tabs)/home');
+      }
     }
   }, [isWalletCreated, isLocked, isLoading, segments]);
 

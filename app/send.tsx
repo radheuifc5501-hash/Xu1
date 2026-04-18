@@ -24,6 +24,7 @@ import {
   isValidRecipient,
   sendEvmNative,
   sendSolanaNative,
+  getNetworkMeta,
 } from '../mobile/services/chainService';
 
 const CHAINS: Chain[] = ['ethereum', 'solana', 'bnb', 'polygon'];
@@ -36,7 +37,7 @@ type SendState =
 
 export default function Send() {
   const router = useRouter();
-  const { selectedBlockchain, walletAddresses, refreshBalances } = useWallet();
+  const { selectedBlockchain, walletAddresses, refreshBalances, network } = useWallet();
   const [toAddress, setToAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [selectedToken, setSelectedToken] = useState<Blockchain>(selectedBlockchain);
@@ -51,9 +52,9 @@ export default function Send() {
       if (!mnemonic) throw new Error('Wallet seed not found on device');
       let hash: string;
       if (selectedToken === 'solana') {
-        hash = await sendSolanaNative(mnemonic, toAddress.trim(), amount);
+        hash = await sendSolanaNative(mnemonic, toAddress.trim(), amount, network);
       } else {
-        hash = await sendEvmNative(selectedToken, mnemonic, toAddress.trim(), amount);
+        hash = await sendEvmNative(selectedToken, mnemonic, toAddress.trim(), amount, network);
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setState({ phase: 'sent', hash, chain: selectedToken });
@@ -85,9 +86,10 @@ export default function Send() {
       Alert.alert('Invalid Amount', 'Please enter a valid amount.');
       return;
     }
+    const netLabel = getNetworkMeta(selectedToken, network).label;
     Alert.alert(
       'Confirm Transaction',
-      `Send ${amount} ${CHAIN_META[selectedToken].symbol} to\n${trimmed.slice(0, 16)}…${trimmed.slice(-8)}?`,
+      `Send ${amount} ${CHAIN_META[selectedToken].symbol} (${netLabel}) to\n${trimmed.slice(0, 16)}…${trimmed.slice(-8)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Send', onPress: performSend },
@@ -96,7 +98,7 @@ export default function Send() {
   };
 
   if (state.phase === 'sent') {
-    const explorer = CHAIN_META[state.chain].explorerTx(state.hash);
+    const explorer = getNetworkMeta(state.chain, network).explorerTx(state.hash);
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.successBox}>
