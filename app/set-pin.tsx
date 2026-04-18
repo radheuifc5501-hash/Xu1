@@ -61,12 +61,15 @@ export default function SetPin() {
       // Surface the actual message so the user can read it on-device. The
       // previous generic text hid PBKDF2 / keystore / address-derivation
       // failures and made remote debugging impossible.
-      const raw =
-        (e && typeof e === 'object' && 'message' in e && String((e as { message?: unknown }).message)) ||
-        String(e);
-      const stage =
-        (e && typeof e === 'object' && '__xuStage' in e && String((e as { __xuStage?: unknown }).__xuStage)) ||
-        null;
+      const asObj = e as { message?: unknown; __xuStage?: unknown } | null | undefined;
+      const raw: string =
+        asObj && typeof asObj === 'object' && typeof asObj.message === 'string'
+          ? asObj.message
+          : String(e);
+      const stage: string | null =
+        asObj && typeof asObj === 'object' && typeof asObj.__xuStage === 'string'
+          ? asObj.__xuStage
+          : null;
       Alert.alert(
         'Failed to set up wallet',
         stage ? `[${stage}] ${raw}` : raw,
