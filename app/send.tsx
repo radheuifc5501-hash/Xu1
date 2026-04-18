@@ -10,56 +10,117 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { useWallet } from '../context/WalletContext';
+import { useWallet, Blockchain } from '../context/WalletContext';
+import { getMnemonic } from '../mobile/services/walletService';
+import {
+  CHAIN_META,
+  Chain,
+  isValidRecipient,
+  sendEvmNative,
+  sendSolanaNative,
+} from '../mobile/services/chainService';
 
-const CHAIN_SYMBOLS: Record<string, string> = {
-  ethereum: 'ETH',
-  solana: 'SOL',
-  bnb: 'BNB',
-  polygon: 'MATIC',
-};
+const CHAINS: Chain[] = ['ethereum', 'solana', 'bnb', 'polygon'];
+
+type SendState =
+  | { phase: 'idle' }
+  | { phase: 'sending' }
+  | { phase: 'sent'; hash: string; chain: Chain }
+  | { phase: 'error'; message: string };
 
 export default function Send() {
   const router = useRouter();
-  const { selectedBlockchain, walletAddresses, tokens } = useWallet();
+  const { selectedBlockchain, walletAddresses, refreshBalances } = useWallet();
   const [toAddress, setToAddress] = useState('');
   const [amount, setAmount] = useState('');
-  const [selectedToken, setSelectedToken] = useState(selectedBlockchain);
+  const [selectedToken, setSelectedToken] = useState<Blockchain>(selectedBlockchain);
+  const [state, setState] = useState<SendState>({ phase: 'idle' });
 
-  const nativeTokens = tokens.filter((t) => !t.contractAddress);
+  const sending = state.phase === 'sending';
+
+  const performSend = async () => {
+    setState({ phase: 'sending' });
+    try {
+      const mnemonic = await getMnemonic();
+      if (!mnemonic) throw new Error('Wallet seed not found on device');
+      let hash: string;
+      if (selectedToken === 'solana') {
+        hash = await sendSolanaNative(mnemonic, toAddress.trim(), amount);
+      } else {
+        hash = await sendEvmNative(selectedToken, mnemonic, toAddress.trim(), amount);
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setState({ phase: 'sent', hash, chain: selectedToken });
+      refreshBalances();
+    } catch (e: any) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setState({
+        phase: 'error',
+        message: typeof e?.message === 'string' ? e.message : 'Transaction failed',
+      });
+    }
+  };
 
   const handleSend = () => {
-    if (!toAddress.trim()) {
+    const trimmed = toAddress.trim();
+    if (!trimmed) {
       Alert.alert('Missing Address', 'Please enter the recipient address.');
       return;
     }
-    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+    if (!isValidRecipient(selectedToken, trimmed)) {
+      Alert.alert(
+        'Invalid Address',
+        `"${trimmed.slice(0, 16)}…" is not a valid ${CHAIN_META[selectedToken].symbol} address.`
+      );
+      return;
+    }
+    const parsed = parseFloat(amount);
+    if (!amount || isNaN(parsed) || parsed <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount.');
       return;
     }
     Alert.alert(
       'Confirm Transaction',
-      `Send ${amount} ${CHAIN_SYMBOLS[selectedToken]} to\n${toAddress.slice(0, 16)}…${toAddress.slice(-8)}?`,
+      `Send ${amount} ${CHAIN_META[selectedToken].symbol} to\n${trimmed.slice(0, 16)}…${trimmed.slice(-8)}?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          onPress: () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            Alert.alert(
-              'Coming Soon',
-              'Transaction signing will be available in the next update.',
-              [{ text: 'OK', onPress: () => router.back() }]
-            );
-          },
-        },
+        { text: 'Send', onPress: performSend },
       ]
     );
   };
+
+  if (state.phase === 'sent') {
+    const explorer = CHAIN_META[state.chain].explorerTx(state.hash);
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.successBox}>
+          <View style={styles.successIcon}>
+            <Ionicons name="checkmark" size={36} color="#fff" />
+          </View>
+          <Text style={styles.successTitle}>Transaction sent</Text>
+          <Text style={styles.successHash} selectable>
+            {state.hash}
+          </Text>
+          <TouchableOpacity
+            style={styles.explorerBtn}
+            onPress={() => Linking.openURL(explorer)}
+          >
+            <Ionicons name="open-outline" size={16} color="#6C4CF1" />
+            <Text style={styles.explorerText}>View in explorer</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.doneBtn} onPress={() => router.back()}>
+            <Text style={styles.doneText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -68,7 +129,7 @@ export default function Send() {
         style={{ flex: 1 }}
       >
         <View style={styles.header}>
-          <TouchableOpacity style={styles.back} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.back} onPress={() => router.back()} disabled={sending}>
             <Ionicons name="close" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Send</Text>
@@ -85,22 +146,23 @@ export default function Send() {
             showsHorizontalScrollIndicator={false}
             style={{ marginBottom: 20 }}
           >
-            {nativeTokens.map((t) => (
+            {CHAINS.map((c) => (
               <TouchableOpacity
-                key={t.id}
+                key={c}
                 style={[
                   styles.tokenChip,
-                  selectedToken === t.blockchain && styles.tokenChipActive,
+                  selectedToken === c && styles.tokenChipActive,
                 ]}
-                onPress={() => setSelectedToken(t.blockchain)}
+                onPress={() => setSelectedToken(c)}
+                disabled={sending}
               >
                 <Text
                   style={[
                     styles.tokenChipText,
-                    selectedToken === t.blockchain && { color: '#FFFFFF' },
+                    selectedToken === c && { color: '#FFFFFF' },
                   ]}
                 >
-                  {t.symbol}
+                  {CHAIN_META[c].symbol}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -112,10 +174,11 @@ export default function Send() {
               style={styles.input}
               value={toAddress}
               onChangeText={setToAddress}
-              placeholder="0x... or Sol address"
+              placeholder={selectedToken === 'solana' ? 'Base58 address' : '0x…'}
               placeholderTextColor="#4A4760"
               autoCapitalize="none"
               autoCorrect={false}
+              editable={!sending}
             />
           </View>
 
@@ -129,10 +192,11 @@ export default function Send() {
                 placeholder="0.00"
                 placeholderTextColor="#4A4760"
                 keyboardType="decimal-pad"
+                editable={!sending}
               />
             </View>
             <View style={styles.symbolBadge}>
-              <Text style={styles.symbolText}>{CHAIN_SYMBOLS[selectedToken]}</Text>
+              <Text style={styles.symbolText}>{CHAIN_META[selectedToken].symbol}</Text>
             </View>
           </View>
 
@@ -141,20 +205,34 @@ export default function Send() {
             <Text style={styles.fromText}>
               From:{' '}
               {walletAddresses
-                ? `${walletAddresses[selectedToken as keyof typeof walletAddresses]?.slice(0, 10)}…`
+                ? `${walletAddresses[selectedToken]?.slice(0, 10)}…`
                 : '—'}
             </Text>
           </View>
+
+          {state.phase === 'error' ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle" size={16} color="#FF6B6B" />
+              <Text style={styles.errorText}>{state.message}</Text>
+            </View>
+          ) : null}
         </ScrollView>
 
         <View style={styles.footer}>
           <TouchableOpacity
-            style={styles.sendBtn}
+            style={[styles.sendBtn, sending && { opacity: 0.6 }]}
             onPress={handleSend}
             activeOpacity={0.85}
+            disabled={sending}
           >
-            <Ionicons name="arrow-up" size={20} color="#fff" />
-            <Text style={styles.sendBtnText}>Send</Text>
+            {sending ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Ionicons name="arrow-up" size={20} color="#fff" />
+            )}
+            <Text style={styles.sendBtnText}>
+              {sending ? 'Broadcasting…' : 'Send'}
+            </Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -174,11 +252,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#1A1825',
   },
   back: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
+  headerTitle: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
   scroll: { padding: 20, paddingBottom: 20 },
   sectionLabel: {
     color: '#9B97B2',
@@ -197,10 +271,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#24223A',
   },
-  tokenChipActive: {
-    backgroundColor: '#6C4CF1',
-    borderColor: '#6C4CF1',
-  },
+  tokenChipActive: { backgroundColor: '#6C4CF1', borderColor: '#6C4CF1' },
   tokenChipText: { color: '#9B97B2', fontSize: 13, fontWeight: '700' },
   inputCard: {
     backgroundColor: '#1A1825',
@@ -209,17 +280,8 @@ const styles = StyleSheet.create({
     borderColor: '#24223A',
     marginBottom: 16,
   },
-  input: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    padding: 14,
-  },
-  amountRow: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
+  input: { color: '#FFFFFF', fontSize: 15, padding: 14 },
+  amountRow: { flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 16 },
   symbolBadge: {
     backgroundColor: '#1A1825',
     borderRadius: 12,
@@ -229,13 +291,20 @@ const styles = StyleSheet.create({
     borderColor: '#24223A',
   },
   symbolText: { color: '#9B97B2', fontSize: 14, fontWeight: '700' },
-  fromRow: {
+  fromRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  fromText: { color: '#9B97B2', fontSize: 13 },
+  errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
+    gap: 8,
+    backgroundColor: '#4B1F2A',
+    borderColor: '#FF6B6B33',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
   },
-  fromText: { color: '#9B97B2', fontSize: 13 },
+  errorText: { color: '#FFB3B3', fontSize: 13, flex: 1 },
   footer: {
     padding: 20,
     paddingBottom: 32,
@@ -252,4 +321,47 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sendBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  successBox: {
+    flex: 1,
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  successIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  successTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  successHash: {
+    color: '#9B97B2',
+    fontSize: 12,
+    fontFamily: 'monospace',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  explorerBtn: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#1A1825',
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  explorerText: { color: '#6C4CF1', fontSize: 14, fontWeight: '700' },
+  doneBtn: {
+    marginTop: 12,
+    backgroundColor: '#6C4CF1',
+    paddingHorizontal: 40,
+    paddingVertical: 14,
+    borderRadius: 14,
+  },
+  doneText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
