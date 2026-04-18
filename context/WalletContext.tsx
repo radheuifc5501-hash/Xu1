@@ -232,10 +232,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const walletAddress = walletAddresses ? walletAddresses[selectedBlockchain] ?? '' : '';
 
   const initWallet = useCallback(async (mnemonic: string) => {
-    const addresses = await deriveAddresses(mnemonic);
+    // Each stage is tagged so the Alert on set-pin can show exactly which
+    // step failed (address derivation vs. secure-storage vs. state update).
+    let addresses: WalletAddresses;
+    try {
+      addresses = await deriveAddresses(mnemonic);
+    } catch (err) {
+      (err as { __xuStage?: string }).__xuStage = 'deriveAddresses';
+      throw err;
+    }
+    try {
+      await saveWalletToStorage(addresses, mnemonic);
+    } catch (err) {
+      (err as { __xuStage?: string }).__xuStage = 'saveWalletToStorage';
+      throw err;
+    }
     setWalletAddresses(addresses);
     addressesRef.current = addresses;
-    await saveWalletToStorage(addresses, mnemonic);
     setSeedPhrase(mnemonic.split(' '));
     setTokens(buildInitialTokens());
     setIsWalletCreated(true);

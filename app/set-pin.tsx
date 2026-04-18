@@ -58,7 +58,20 @@ export default function SetPin() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace('/(tabs)/home');
     } catch (e) {
-      Alert.alert('Error', 'Failed to set up wallet. Please try again.');
+      // Surface the actual message so the user can read it on-device. The
+      // previous generic text hid PBKDF2 / keystore / address-derivation
+      // failures and made remote debugging impossible.
+      const raw =
+        (e && typeof e === 'object' && 'message' in e && String((e as { message?: unknown }).message)) ||
+        String(e);
+      const stage =
+        (e && typeof e === 'object' && '__xuStage' in e && String((e as { __xuStage?: unknown }).__xuStage)) ||
+        null;
+      Alert.alert(
+        'Failed to set up wallet',
+        stage ? `[${stage}] ${raw}` : raw,
+        [{ text: 'OK' }]
+      );
       setLoading(false);
     }
   };
