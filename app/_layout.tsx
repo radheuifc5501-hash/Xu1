@@ -47,21 +47,6 @@ const errStyles = StyleSheet.create({
   title: { color: '#FF4444', fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
   message: { color: '#FFFFFF', fontSize: 14, marginBottom: 12 },
   stack: { color: '#AAAAAA', fontSize: 11 },
-  boot: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    padding: 6,
-    backgroundColor: '#6C4CF1',
-    zIndex: 9999,
-  },
-  bootText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    textAlign: 'center',
-    fontWeight: '600',
-  },
 });
 
 function NavigationGuard() {
@@ -119,10 +104,8 @@ function AppStack() {
 
 export default function RootLayout() {
   const [globalError, setGlobalError] = useState<string | null>(null);
-  const [bootStage, setBootStage] = useState<string>('layout-mounted');
 
   useEffect(() => {
-    setBootStage('layout-effect');
     try {
       const EU = (globalThis as any).ErrorUtils;
       if (EU && typeof EU.getGlobalHandler === 'function') {
@@ -146,7 +129,6 @@ export default function RootLayout() {
   useEffect(() => {
     const t = setTimeout(() => {
       SplashScreen.hideAsync().catch(() => {});
-      setBootStage('splash-hidden');
     }, 300);
     return () => clearTimeout(t);
   }, []);
@@ -166,9 +148,6 @@ export default function RootLayout() {
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0E17' }}>
         <SafeAreaProvider>
-          <View style={errStyles.boot} pointerEvents="none">
-            <Text style={errStyles.bootText}>XU · {bootStage}</Text>
-          </View>
           <WalletProvider>
             <StatusBar style="light" />
             <AppStack />

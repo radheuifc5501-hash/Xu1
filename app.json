@@ -19,6 +19,7 @@
     },
     "android": {
       "package": "com.xuwallet.app",
+      "versionCode": 4,
       "adaptiveIcon": {
         "backgroundColor": "#0F0E17"
       },
