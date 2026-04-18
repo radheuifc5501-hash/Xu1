@@ -8,12 +8,16 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useWallet } from '../../context/WalletContext';
+import { CHAIN_META, Chain, NETWORK_META } from '../../mobile/services/chainService';
+
+const FAUCET_CHAINS: Chain[] = ['ethereum', 'bnb', 'polygon', 'solana'];
 
 export default function Settings() {
   const router = useRouter();
@@ -24,8 +28,34 @@ export default function Settings() {
     setAutoLockTimer,
     resetWallet,
     setIsLocked,
+    network,
+    setNetwork,
   } = useWallet();
   const [bioToggling, setBioToggling] = useState(false);
+
+  const handleNetworkToggle = async (useTestnet: boolean) => {
+    const target = useTestnet ? 'testnet' : 'mainnet';
+    if (target === network) return;
+    if (useTestnet) {
+      Alert.alert(
+        'Switch to Testnet',
+        'Balances and transactions will use Sepolia, BSC Testnet, Amoy, and Solana Devnet. USD values are hidden on testnet.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Switch',
+            onPress: async () => {
+              await setNetwork('testnet');
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            },
+          },
+        ]
+      );
+    } else {
+      await setNetwork('mainnet');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  };
 
   const handleBioToggle = async (val: boolean) => {
     if (val) {
@@ -75,6 +105,69 @@ export default function Settings() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.pageTitle}>Settings</Text>
+
+        <Text style={styles.sectionLabel}>Network</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <Ionicons
+                name={network === 'testnet' ? 'flask-outline' : 'globe-outline'}
+                size={20}
+                color={network === 'testnet' ? '#F59E0B' : '#6C4CF1'}
+              />
+              <View>
+                <Text style={styles.rowLabel}>
+                  {network === 'testnet' ? 'Testnet' : 'Mainnet'}
+                </Text>
+                <Text style={styles.rowSub}>
+                  {network === 'testnet'
+                    ? 'Sepolia · BSC Testnet · Amoy · Devnet'
+                    : 'Real funds. USD values enabled.'}
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={network === 'testnet'}
+              onValueChange={handleNetworkToggle}
+              trackColor={{ false: '#24223A', true: '#F59E0B' }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+
+          {network === 'testnet' ? (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.col}>
+                <View style={styles.rowLeft}>
+                  <Ionicons name="water-outline" size={20} color="#6C4CF1" />
+                  <Text style={styles.rowLabel}>Faucets</Text>
+                </View>
+                <Text style={styles.rowSub}>
+                  Request free test funds for each chain.
+                </Text>
+                <View style={styles.faucetGrid}>
+                  {FAUCET_CHAINS.map((c) => {
+                    const url = NETWORK_META.testnet[c].faucet;
+                    if (!url) return null;
+                    return (
+                      <TouchableOpacity
+                        key={c}
+                        style={styles.faucetChip}
+                        onPress={() => Linking.openURL(url)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.faucetChipText}>
+                          {CHAIN_META[c].symbol}
+                        </Text>
+                        <Ionicons name="open-outline" size={12} color="#6C4CF1" />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            </>
+          ) : null}
+        </View>
 
         <Text style={styles.sectionLabel}>Security</Text>
         <View style={styles.card}>
@@ -238,6 +331,33 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '500',
+  },
+  rowSub: {
+    color: '#9B97B2',
+    fontSize: 12,
+    marginTop: 2,
+    maxWidth: 220,
+  },
+  faucetGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  faucetChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#24223A',
+    borderWidth: 1,
+    borderColor: '#6C4CF133',
+  },
+  faucetChipText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
   },
   divider: {
     height: 1,

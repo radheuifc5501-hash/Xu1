@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   deriveAddresses,
   saveWalletToStorage,
@@ -11,11 +12,13 @@ import {
   saveBiometricEnabled,
   WalletAddresses,
 } from '../mobile/services/walletService';
-import { CHAIN_META, Chain, getNativeBalance } from '../mobile/services/chainService';
+import { CHAIN_META, Chain, getNativeBalance, Network } from '../mobile/services/chainService';
 import { getPrices, PriceInfo } from '../mobile/services/priceService';
 
+const NETWORK_STORAGE_KEY = 'xu_wallet_network';
+
 export type Blockchain = Chain;
-export type Network = 'mainnet' | 'testnet';
+export type { Network };
 
 export interface Token {
   id: string;
@@ -40,7 +43,7 @@ interface WalletContextType {
   selectedBlockchain: Blockchain;
   setSelectedBlockchain: (value: Blockchain) => void;
   network: Network;
-  setNetwork: (value: Network) => void;
+  setNetwork: (value: Network) => Promise<void>;
   tokens: Token[];
   addToken: (token: Token) => void;
   walletAddress: string;
@@ -85,7 +88,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [pin, setPinState] = useState<string | null>(null);
   const [seedPhrase, setSeedPhrase] = useState<string[]>([]);
   const [selectedBlockchain, setSelectedBlockchain] = useState<Blockchain>('ethereum');
-  const [network, setNetwork] = useState<Network>('mainnet');
+  const [network, setNetworkState] = useState<Network>('mainnet');
+  const networkRef = useRef<Network>('mainnet');
   const [tokens, setTokens] = useState<Token[]>([]);
   const [walletAddresses, setWalletAddresses] = useState<WalletAddresses | null>(null);
   const [isLoadingBalances, setIsLoadingBalances] = useState(false);
@@ -101,14 +105,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     addressesRef.current = walletAddresses;
   }, [walletAddresses]);
 
+  useEffect(() => {
+    networkRef.current = network;
+  }, [network]);
+
   const refreshBalances = useCallback(async () => {
     const addr = addressesRef.current;
     if (!addr) return;
+    const net = networkRef.current;
     setIsLoadingBalances(true);
     try {
+      // CoinGecko only prices mainnet tokens, so testnet portfolio value is
+      // intentionally $0. We still fetch balances, just skip the price call.
+      const pricesPromise: Promise<Partial<Record<Chain, PriceInfo>>> =
+        net === 'mainnet' ? getPrices(CHAINS) : Promise.resolve({});
       const [pricesByChain, ...balances] = await Promise.all([
-        getPrices(CHAINS),
-        ...CHAINS.map((c) => getNativeBalance(c, addr[c]).catch(() => 0)),
+        pricesPromise,
+        ...CHAINS.map((c) => getNativeBalance(c, addr[c], net).catch(() => 0)),
       ]);
       setPrices(pricesByChain);
       setTokens((prev) => {
@@ -138,16 +151,32 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const setNetwork = useCallback(async (value: Network) => {
+    networkRef.current = value;
+    setNetworkState(value);
+    try {
+      await AsyncStorage.setItem(NETWORK_STORAGE_KEY, value);
+    } catch {
+      // Non-fatal: if persistence fails we'll just default back to
+      // mainnet next launch.
+    }
+  }, []);
+
   useEffect(() => {
     const init = async () => {
       try {
-        const [storedPin, { addresses, created, mnemonic }, bio] = await Promise.all([
+        const [storedPin, { addresses, created, mnemonic }, bio, storedNet] = await Promise.all([
           getPin(),
           loadWalletFromStorage(),
           getBiometricEnabled(),
+          AsyncStorage.getItem(NETWORK_STORAGE_KEY),
         ]);
         setPinState(storedPin);
         setBiometricEnabledState(bio);
+        if (storedNet === 'testnet' || storedNet === 'mainnet') {
+          networkRef.current = storedNet;
+          setNetworkState(storedNet);
+        }
         if (created && addresses) {
           setIsWalletCreated(true);
           setWalletAddresses(addresses);
@@ -163,12 +192,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     init();
   }, []);
 
-  // Auto-refresh once the wallet is unlocked so the user sees real numbers
-  // without having to pull down.
+  // Auto-refresh once the wallet is unlocked (or when network changes) so
+  // the user sees real numbers without having to pull down.
   useEffect(() => {
     if (!isWalletCreated || isLocked) return;
     refreshBalances();
-  }, [isWalletCreated, isLocked, refreshBalances]);
+  }, [isWalletCreated, isLocked, network, refreshBalances]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {

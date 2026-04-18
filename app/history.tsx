@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,13 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useWallet, Blockchain } from '../context/WalletContext';
-import { CHAIN_META, Chain, getHistory, TxRow } from '../mobile/services/chainService';
+import {
+  CHAIN_META,
+  Chain,
+  getHistory,
+  TxRow,
+  getNetworkMeta,
+} from '../mobile/services/chainService';
 
 const CHAINS: Chain[] = ['ethereum', 'solana', 'bnb', 'polygon'];
 
@@ -32,7 +38,7 @@ function relTime(ts: number): string {
 export default function History() {
   const router = useRouter();
   const params = useLocalSearchParams<{ chain?: string }>();
-  const { walletAddresses, selectedBlockchain } = useWallet();
+  const { walletAddresses, selectedBlockchain, network } = useWallet();
   const initialChain =
     (params.chain as Blockchain) &&
     CHAINS.includes(params.chain as Chain)
@@ -42,10 +48,16 @@ export default function History() {
   const [rows, setRows] = useState<TxRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Monotonic request id so stale in-flight fetches (for the previous
+  // chain/network) can't clobber the current chain's rows if they finish
+  // out of order. Every new load() bumps the counter; the handler only
+  // commits if its captured id still matches the latest.
+  const reqIdRef = useRef(0);
 
   const load = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!walletAddresses) return;
+      const myReqId = ++reqIdRef.current;
       if (!opts?.silent) {
         setLoading(true);
         // Clear stale rows from the previous chain so the spinner shows
@@ -53,14 +65,17 @@ export default function History() {
         setRows([]);
       }
       try {
-        const out = await getHistory(chain, walletAddresses[chain]);
+        const out = await getHistory(chain, walletAddresses[chain], network);
+        if (myReqId !== reqIdRef.current) return;
         setRows(out);
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (myReqId === reqIdRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
-    [chain, walletAddresses]
+    [chain, walletAddresses, network]
   );
 
   useEffect(() => {

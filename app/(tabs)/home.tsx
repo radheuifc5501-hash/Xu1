@@ -14,7 +14,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useWallet, Blockchain } from '../../context/WalletContext';
-import { CHAIN_META } from '../../mobile/services/chainService';
+import { CHAIN_META, getNetworkMeta } from '../../mobile/services/chainService';
 
 const CHAIN_COLORS: Record<Blockchain, string> = {
   ethereum: '#627EEA',
@@ -58,7 +58,11 @@ export default function Home() {
     refreshBalances,
     walletAddress,
     lastRefreshedAt,
+    network,
   } = useWallet();
+
+  const isTestnet = network === 'testnet';
+  const networkLabel = getNetworkMeta(selectedBlockchain, network).label;
 
   const [copied, setCopied] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -114,7 +118,32 @@ export default function Home() {
         }
       >
         <View style={styles.headerRow}>
-          <Text style={styles.headerTitle}>XU Wallet</Text>
+          <View style={styles.headerLeft}>
+            <Text style={styles.headerTitle}>XU Wallet</Text>
+            <TouchableOpacity
+              style={[
+                styles.networkPill,
+                isTestnet && styles.networkPillTestnet,
+              ]}
+              onPress={() => router.push('/(tabs)/settings')}
+              activeOpacity={0.8}
+            >
+              <View
+                style={[
+                  styles.networkDot,
+                  { backgroundColor: isTestnet ? '#F59E0B' : '#10B981' },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.networkPillText,
+                  isTestnet && { color: '#FCD34D' },
+                ]}
+              >
+                {isTestnet ? `Testnet · ${networkLabel}` : 'Mainnet'}
+              </Text>
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             style={styles.historyBtn}
             onPress={() => router.push({ pathname: '/history', params: { chain: selectedBlockchain } })}
@@ -301,7 +330,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  networkPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#1A1825',
+    borderWidth: 1,
+    borderColor: '#24223A',
+  },
+  networkPillTestnet: {
+    backgroundColor: '#3B2A0E',
+    borderColor: '#F59E0B55',
+  },
+  networkDot: { width: 6, height: 6, borderRadius: 3 },
+  networkPillText: { color: '#9B97B2', fontSize: 11, fontWeight: '700' },
   historyBtn: {
     width: 36,
     height: 36,

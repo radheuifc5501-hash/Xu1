@@ -5,6 +5,7 @@ import bs58 from 'bs58';
 import { Buffer } from 'buffer';
 
 export type Chain = 'ethereum' | 'bnb' | 'polygon' | 'solana';
+export type Network = 'mainnet' | 'testnet';
 
 export interface ChainMeta {
   id: Chain;
@@ -12,13 +13,11 @@ export interface ChainMeta {
   symbol: string;
   decimals: number;
   coingeckoId: string;
-  rpc: string;
-  explorerApi?: string;
-  explorerTx: (hash: string) => string;
 }
 
-// Public, no-key RPCs. If any becomes rate-limited we can swap it out
-// without touching call sites.
+// Network-independent display info. Kept as a separate record so UI code
+// (Home / Send / History) doesn't have to care which network is currently
+// selected when it just wants to render "ETH" or show the right decimals.
 export const CHAIN_META: Record<Chain, ChainMeta> = {
   ethereum: {
     id: 'ethereum',
@@ -26,9 +25,6 @@ export const CHAIN_META: Record<Chain, ChainMeta> = {
     symbol: 'ETH',
     decimals: 18,
     coingeckoId: 'ethereum',
-    rpc: 'https://ethereum-rpc.publicnode.com',
-    explorerApi: 'https://api.etherscan.io/api',
-    explorerTx: (h) => `https://etherscan.io/tx/${h}`,
   },
   bnb: {
     id: 'bnb',
@@ -36,9 +32,6 @@ export const CHAIN_META: Record<Chain, ChainMeta> = {
     symbol: 'BNB',
     decimals: 18,
     coingeckoId: 'binancecoin',
-    rpc: 'https://bsc-rpc.publicnode.com',
-    explorerApi: 'https://api.bscscan.com/api',
-    explorerTx: (h) => `https://bscscan.com/tx/${h}`,
   },
   polygon: {
     id: 'polygon',
@@ -46,9 +39,6 @@ export const CHAIN_META: Record<Chain, ChainMeta> = {
     symbol: 'MATIC',
     decimals: 18,
     coingeckoId: 'matic-network',
-    rpc: 'https://polygon-bor-rpc.publicnode.com',
-    explorerApi: 'https://api.polygonscan.com/api',
-    explorerTx: (h) => `https://polygonscan.com/tx/${h}`,
   },
   solana: {
     id: 'solana',
@@ -56,20 +46,101 @@ export const CHAIN_META: Record<Chain, ChainMeta> = {
     symbol: 'SOL',
     decimals: 9,
     coingeckoId: 'solana',
-    rpc: 'https://solana-rpc.publicnode.com',
-    explorerApi: 'https://public-api.solscan.io',
-    explorerTx: (h) => `https://solscan.io/tx/${h}`,
   },
 };
+
+export interface NetworkMeta {
+  label: string;
+  rpc: string;
+  explorerApi?: string;
+  explorerTx: (hash: string) => string;
+  chainId?: number; // EVM only
+  faucet?: string;
+}
+
+// Public, no-key endpoints for each (chain, network) pair. If any becomes
+// rate-limited we can swap the RPC without touching call sites.
+export const NETWORK_META: Record<Network, Record<Chain, NetworkMeta>> = {
+  mainnet: {
+    ethereum: {
+      label: 'Mainnet',
+      rpc: 'https://ethereum-rpc.publicnode.com',
+      explorerApi: 'https://api.etherscan.io/api',
+      explorerTx: (h) => `https://etherscan.io/tx/${h}`,
+      chainId: 1,
+    },
+    bnb: {
+      label: 'Mainnet',
+      rpc: 'https://bsc-rpc.publicnode.com',
+      explorerApi: 'https://api.bscscan.com/api',
+      explorerTx: (h) => `https://bscscan.com/tx/${h}`,
+      chainId: 56,
+    },
+    polygon: {
+      label: 'Mainnet',
+      rpc: 'https://polygon-bor-rpc.publicnode.com',
+      explorerApi: 'https://api.polygonscan.com/api',
+      explorerTx: (h) => `https://polygonscan.com/tx/${h}`,
+      chainId: 137,
+    },
+    solana: {
+      label: 'Mainnet',
+      rpc: 'https://solana-rpc.publicnode.com',
+      explorerTx: (h) => `https://solscan.io/tx/${h}`,
+    },
+  },
+  testnet: {
+    ethereum: {
+      label: 'Sepolia',
+      rpc: 'https://ethereum-sepolia-rpc.publicnode.com',
+      explorerApi: 'https://api-sepolia.etherscan.io/api',
+      explorerTx: (h) => `https://sepolia.etherscan.io/tx/${h}`,
+      chainId: 11155111,
+      faucet: 'https://www.alchemy.com/faucets/ethereum-sepolia',
+    },
+    bnb: {
+      label: 'BSC Testnet',
+      rpc: 'https://bsc-testnet-rpc.publicnode.com',
+      explorerApi: 'https://api-testnet.bscscan.com/api',
+      explorerTx: (h) => `https://testnet.bscscan.com/tx/${h}`,
+      chainId: 97,
+      faucet: 'https://www.bnbchain.org/en/testnet-faucet',
+    },
+    polygon: {
+      label: 'Amoy',
+      rpc: 'https://polygon-amoy-bor-rpc.publicnode.com',
+      explorerApi: 'https://api-amoy.polygonscan.com/api',
+      explorerTx: (h) => `https://amoy.polygonscan.com/tx/${h}`,
+      chainId: 80002,
+      faucet: 'https://faucet.polygon.technology/',
+    },
+    solana: {
+      label: 'Devnet',
+      rpc: 'https://api.devnet.solana.com',
+      // Solscan accepts ?cluster=devnet for devnet inspection.
+      explorerTx: (h) => `https://solscan.io/tx/${h}?cluster=devnet`,
+      faucet: 'https://faucet.solana.com/',
+    },
+  },
+};
+
+export function getNetworkMeta(chain: Chain, network: Network): NetworkMeta {
+  return NETWORK_META[network][chain];
+}
 
 const EVM_CHAINS: Chain[] = ['ethereum', 'bnb', 'polygon'];
 
 // ---- Balance reads -------------------------------------------------------
 
-export async function getNativeBalance(chain: Chain, address: string): Promise<number> {
+export async function getNativeBalance(
+  chain: Chain,
+  address: string,
+  network: Network = 'mainnet'
+): Promise<number> {
   if (!address) return 0;
-  if (chain === 'solana') return getSolanaBalance(address);
-  const provider = new ethers.JsonRpcProvider(CHAIN_META[chain].rpc);
+  const net = getNetworkMeta(chain, network);
+  if (chain === 'solana') return getSolanaBalance(address, net.rpc);
+  const provider = new ethers.JsonRpcProvider(net.rpc);
   const wei = await provider.getBalance(address);
   return Number(ethers.formatUnits(wei, CHAIN_META[chain].decimals));
 }
@@ -85,8 +156,8 @@ async function rpc(url: string, body: unknown): Promise<any> {
   return json.result;
 }
 
-async function getSolanaBalance(address: string): Promise<number> {
-  const lamports = (await rpc(CHAIN_META.solana.rpc, {
+async function getSolanaBalance(address: string, rpcUrl: string): Promise<number> {
+  const lamports = (await rpc(rpcUrl, {
     jsonrpc: '2.0',
     id: 1,
     method: 'getBalance',
@@ -101,11 +172,13 @@ export async function sendEvmNative(
   chain: Chain,
   mnemonic: string,
   to: string,
-  amount: string
+  amount: string,
+  network: Network = 'mainnet'
 ): Promise<string> {
   if (!EVM_CHAINS.includes(chain)) throw new Error(`sendEvmNative: wrong chain ${chain}`);
   if (!ethers.isAddress(to)) throw new Error('Invalid recipient address');
-  const provider = new ethers.JsonRpcProvider(CHAIN_META[chain].rpc);
+  const net = getNetworkMeta(chain, network);
+  const provider = new ethers.JsonRpcProvider(net.rpc);
   const wallet = ethers.Wallet.fromPhrase(mnemonic.trim()).connect(provider);
   const value = ethers.parseUnits(amount, CHAIN_META[chain].decimals);
   const tx = await wallet.sendTransaction({ to, value });
@@ -125,7 +198,7 @@ function encodeCompactU16(n: number): number[] {
   const out: number[] = [];
   let v = n;
   while (true) {
-    let b = v & 0x7f;
+    const b = v & 0x7f;
     v >>= 7;
     if (v === 0) {
       out.push(b);
@@ -154,7 +227,8 @@ async function solanaKeypairFromMnemonic(mnemonic: string) {
 export async function sendSolanaNative(
   mnemonic: string,
   to: string,
-  amount: string
+  amount: string,
+  network: Network = 'mainnet'
 ): Promise<string> {
   const lamports = BigInt(Math.round(parseFloat(amount) * 1e9));
   if (lamports <= 0n) throw new Error('Invalid amount');
@@ -164,8 +238,9 @@ export async function sendSolanaNative(
 
   const { secret, publicKey: fromPub } = await solanaKeypairFromMnemonic(mnemonic);
   const systemPub = bs58.decode(SYSTEM_PROGRAM_ID);
+  const rpcUrl = getNetworkMeta('solana', network).rpc;
 
-  const blockhashB58: string = (await rpc(CHAIN_META.solana.rpc, {
+  const blockhashB58: string = (await rpc(rpcUrl, {
     jsonrpc: '2.0',
     id: 1,
     method: 'getLatestBlockhash',
@@ -215,7 +290,7 @@ export async function sendSolanaNative(
   const transaction = new Uint8Array([...signatures, ...message]);
   const txBase64 = Buffer.from(transaction).toString('base64');
 
-  const signatureB58: string = await rpc(CHAIN_META.solana.rpc, {
+  const signatureB58: string = await rpc(rpcUrl, {
     jsonrpc: '2.0',
     id: 1,
     method: 'sendTransaction',
@@ -225,7 +300,8 @@ export async function sendSolanaNative(
 }
 
 // Sanity helper for callers who want to detect malformed input before they
-// bother the user with a confirmation sheet.
+// bother the user with a confirmation sheet. Recipient format doesn't
+// change with network, so this stays network-less.
 export function isValidRecipient(chain: Chain, address: string): boolean {
   if (!address) return false;
   if (chain === 'solana') {
@@ -252,9 +328,15 @@ export interface TxRow {
   explorerUrl: string;
 }
 
-async function evmHistory(chain: Chain, address: string, apiKey?: string): Promise<TxRow[]> {
+async function evmHistory(
+  chain: Chain,
+  address: string,
+  network: Network,
+  apiKey?: string
+): Promise<TxRow[]> {
+  const net = getNetworkMeta(chain, network);
   const meta = CHAIN_META[chain];
-  if (!meta.explorerApi) return [];
+  if (!net.explorerApi) return [];
   const params = new URLSearchParams({
     module: 'account',
     action: 'txlist',
@@ -266,7 +348,7 @@ async function evmHistory(chain: Chain, address: string, apiKey?: string): Promi
     sort: 'desc',
   });
   if (apiKey) params.set('apikey', apiKey);
-  const url = `${meta.explorerApi}?${params.toString()}`;
+  const url = `${net.explorerApi}?${params.toString()}`;
   const res = await fetch(url);
   if (!res.ok) return [];
   const json = await res.json().catch(() => ({}));
@@ -290,14 +372,15 @@ async function evmHistory(chain: Chain, address: string, apiKey?: string): Promi
       symbol: meta.symbol,
       direction: dir,
       status: String(t.isError) === '0' ? 'success' : 'failed',
-      explorerUrl: meta.explorerTx(String(t.hash)),
+      explorerUrl: net.explorerTx(String(t.hash)),
     };
   });
 }
 
-async function solanaHistory(address: string): Promise<TxRow[]> {
+async function solanaHistory(address: string, network: Network): Promise<TxRow[]> {
+  const net = getNetworkMeta('solana', network);
   const meta = CHAIN_META.solana;
-  const sigs: any[] = await rpc(meta.rpc, {
+  const sigs: any[] = await rpc(net.rpc, {
     jsonrpc: '2.0',
     id: 1,
     method: 'getSignaturesForAddress',
@@ -313,19 +396,20 @@ async function solanaHistory(address: string): Promise<TxRow[]> {
     symbol: meta.symbol,
     direction: 'self',
     status: s.err ? 'failed' : 'success',
-    explorerUrl: meta.explorerTx(String(s.signature)),
+    explorerUrl: net.explorerTx(String(s.signature)),
   }));
 }
 
 export async function getHistory(
   chain: Chain,
   address: string,
+  network: Network = 'mainnet',
   apiKey?: string
 ): Promise<TxRow[]> {
   if (!address) return [];
   try {
-    if (chain === 'solana') return await solanaHistory(address);
-    return await evmHistory(chain, address, apiKey);
+    if (chain === 'solana') return await solanaHistory(address, network);
+    return await evmHistory(chain, address, network, apiKey);
   } catch {
     return [];
   }
