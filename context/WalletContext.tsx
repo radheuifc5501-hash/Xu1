@@ -100,6 +100,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [isLocked, setIsLocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const addressesRef = useRef<WalletAddresses | null>(null);
+  // Monotonic request id for refreshBalances. Flipping the network fires a
+  // new fetch via the auto-refresh effect; if the user toggles quickly the
+  // earlier fetch could resolve after the later one and paint the wrong
+  // network's balances. Every call bumps this counter; the handler only
+  // commits when its captured id still matches.
+  const refreshIdRef = useRef(0);
 
   useEffect(() => {
     addressesRef.current = walletAddresses;
@@ -113,6 +119,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const addr = addressesRef.current;
     if (!addr) return;
     const net = networkRef.current;
+    const myReqId = ++refreshIdRef.current;
     setIsLoadingBalances(true);
     try {
       // CoinGecko only prices mainnet tokens, so testnet portfolio value is
@@ -123,6 +130,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         pricesPromise,
         ...CHAINS.map((c) => getNativeBalance(c, addr[c], net).catch(() => 0)),
       ]);
+      // Discard if a newer refresh (e.g. after a network toggle) is already
+      // in flight. Otherwise a slow mainnet fetch could overwrite the
+      // testnet numbers we just painted.
+      if (myReqId !== refreshIdRef.current) return;
       setPrices(pricesByChain);
       setTokens((prev) => {
         // Preserve any custom tokens the user has added via addToken. We
@@ -147,7 +158,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       });
       setLastRefreshedAt(Date.now());
     } finally {
-      setIsLoadingBalances(false);
+      if (myReqId === refreshIdRef.current) setIsLoadingBalances(false);
     }
   }, []);
 
@@ -240,6 +251,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const resetWallet = useCallback(async () => {
     await clearWalletFromStorage();
+    // Clear the persisted network choice too, so a fresh wallet on the
+    // same device always starts on mainnet instead of silently inheriting
+    // the previous user's testnet setting.
+    try {
+      await AsyncStorage.removeItem(NETWORK_STORAGE_KEY);
+    } catch {
+      // Non-fatal: worst case the user sees a testnet pill on first
+      // launch and flips it back manually.
+    }
     setPinState(null);
     setSeedPhrase([]);
     setWalletAddresses(null);
@@ -250,6 +270,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setIsLocked(false);
     setPrices({});
     setLastRefreshedAt(null);
+    networkRef.current = 'mainnet';
+    setNetworkState('mainnet');
   }, []);
 
   return (
