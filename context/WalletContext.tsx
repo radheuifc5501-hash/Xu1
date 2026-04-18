@@ -112,7 +112,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       ]);
       setPrices(pricesByChain);
       setTokens((prev) => {
-        const next = prev.length === CHAINS.length ? [...prev] : buildInitialTokens();
+        // Preserve any custom tokens the user has added via addToken. We
+        // only rebuild the list from scratch when the array is somehow
+        // shorter than the required native-chain baseline.
+        const next = prev.length >= CHAINS.length ? [...prev] : buildInitialTokens();
         CHAINS.forEach((c, i) => {
           const bal = balances[i] as number;
           const price = pricesByChain[c]?.usd ?? 0;

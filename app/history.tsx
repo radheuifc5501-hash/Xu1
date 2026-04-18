@@ -46,7 +46,12 @@ export default function History() {
   const load = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!walletAddresses) return;
-      if (!opts?.silent) setLoading(true);
+      if (!opts?.silent) {
+        setLoading(true);
+        // Clear stale rows from the previous chain so the spinner shows
+        // instead of misleading the user with another chain's history.
+        setRows([]);
+      }
       try {
         const out = await getHistory(chain, walletAddresses[chain]);
         setRows(out);
