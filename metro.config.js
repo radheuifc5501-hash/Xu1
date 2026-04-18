@@ -3,6 +3,13 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
+// The top-level /src/ tree is the legacy Vite/web build (uses react-router +
+// import.meta). Block only the project's own src/ directory from the React
+// Native bundle — not any src/ folder inside node_modules (e.g. RN's own
+// react-native/src). Anchoring to __dirname avoids collisions.
+const projectSrcDir = path.resolve(__dirname, 'src').replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+config.resolver.blockList = new RegExp(`^${projectSrcDir}[\\\\/].*`);
+
 config.resolver.extraNodeModules = {
   crypto: path.resolve(__dirname, 'node_modules/crypto-browserify'),
   stream: path.resolve(__dirname, 'node_modules/readable-stream'),
