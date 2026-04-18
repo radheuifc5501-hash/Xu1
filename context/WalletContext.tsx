@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import {
   deriveAddresses,
@@ -11,8 +11,10 @@ import {
   saveBiometricEnabled,
   WalletAddresses,
 } from '../mobile/services/walletService';
+import { CHAIN_META, Chain, getNativeBalance } from '../mobile/services/chainService';
+import { getPrices, PriceInfo } from '../mobile/services/priceService';
 
-export type Blockchain = 'solana' | 'ethereum' | 'bnb' | 'polygon';
+export type Blockchain = Chain;
 export type Network = 'mainnet' | 'testnet';
 
 export interface Token {
@@ -21,6 +23,7 @@ export interface Token {
   symbol: string;
   balance: number;
   balanceUSD: number;
+  change24h: number;
   contractAddress?: string;
   decimals?: number;
   logo?: string;
@@ -44,7 +47,9 @@ interface WalletContextType {
   walletAddresses: WalletAddresses | null;
   initWallet: (mnemonic: string) => Promise<void>;
   isLoadingBalances: boolean;
-  refreshBalances: () => void;
+  lastRefreshedAt: number | null;
+  refreshBalances: () => Promise<void>;
+  prices: Partial<Record<Blockchain, PriceInfo>>;
   biometricEnabled: boolean;
   setBiometricEnabled: (value: boolean) => Promise<void>;
   autoLockTimer: number;
@@ -57,12 +62,23 @@ interface WalletContextType {
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
-const NATIVE_TOKEN_DEFS: { blockchain: Blockchain; id: string; name: string; symbol: string }[] = [
-  { blockchain: 'ethereum', id: 'eth', name: 'Ethereum', symbol: 'ETH' },
-  { blockchain: 'solana', id: 'sol', name: 'Solana', symbol: 'SOL' },
-  { blockchain: 'bnb', id: 'bnb', name: 'BNB', symbol: 'BNB' },
-  { blockchain: 'polygon', id: 'matic', name: 'Polygon', symbol: 'MATIC' },
-];
+const CHAINS: Blockchain[] = ['ethereum', 'solana', 'bnb', 'polygon'];
+
+function buildInitialTokens(): Token[] {
+  return CHAINS.map((c) => {
+    const m = CHAIN_META[c];
+    return {
+      id: c,
+      name: m.name,
+      symbol: m.symbol,
+      balance: 0,
+      balanceUSD: 0,
+      change24h: 0,
+      decimals: m.decimals,
+      blockchain: c,
+    };
+  });
+}
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [isWalletCreated, setIsWalletCreated] = useState(false);
@@ -73,10 +89,54 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [walletAddresses, setWalletAddresses] = useState<WalletAddresses | null>(null);
   const [isLoadingBalances, setIsLoadingBalances] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [prices, setPrices] = useState<Partial<Record<Blockchain, PriceInfo>>>({});
   const [biometricEnabled, setBiometricEnabledState] = useState(false);
   const [autoLockTimer, setAutoLockTimer] = useState(5);
   const [isLocked, setIsLocked] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const addressesRef = useRef<WalletAddresses | null>(null);
+
+  useEffect(() => {
+    addressesRef.current = walletAddresses;
+  }, [walletAddresses]);
+
+  const refreshBalances = useCallback(async () => {
+    const addr = addressesRef.current;
+    if (!addr) return;
+    setIsLoadingBalances(true);
+    try {
+      const [pricesByChain, ...balances] = await Promise.all([
+        getPrices(CHAINS),
+        ...CHAINS.map((c) => getNativeBalance(c, addr[c]).catch(() => 0)),
+      ]);
+      setPrices(pricesByChain);
+      setTokens((prev) => {
+        // Preserve any custom tokens the user has added via addToken. We
+        // only rebuild the list from scratch when the array is somehow
+        // shorter than the required native-chain baseline.
+        const next = prev.length >= CHAINS.length ? [...prev] : buildInitialTokens();
+        CHAINS.forEach((c, i) => {
+          const bal = balances[i] as number;
+          const price = pricesByChain[c]?.usd ?? 0;
+          const change = pricesByChain[c]?.change24h ?? 0;
+          const slot = next.findIndex((t) => t.blockchain === c && !t.contractAddress);
+          if (slot >= 0) {
+            next[slot] = {
+              ...next[slot],
+              balance: bal,
+              balanceUSD: bal * price,
+              change24h: change,
+            };
+          }
+        });
+        return next;
+      });
+      setLastRefreshedAt(Date.now());
+    } finally {
+      setIsLoadingBalances(false);
+    }
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -91,8 +151,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         if (created && addresses) {
           setIsWalletCreated(true);
           setWalletAddresses(addresses);
+          addressesRef.current = addresses;
           if (mnemonic) setSeedPhrase(mnemonic.split(' '));
-          setTokens(NATIVE_TOKEN_DEFS.map((d) => ({ ...d, balance: 0, balanceUSD: 0 })));
+          setTokens(buildInitialTokens());
           setIsLocked(true);
         }
       } finally {
@@ -101,6 +162,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     };
     init();
   }, []);
+
+  // Auto-refresh once the wallet is unlocked so the user sees real numbers
+  // without having to pull down.
+  useEffect(() => {
+    if (!isWalletCreated || isLocked) return;
+    refreshBalances();
+  }, [isWalletCreated, isLocked, refreshBalances]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
@@ -126,15 +194,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const initWallet = useCallback(async (mnemonic: string) => {
     const addresses = await deriveAddresses(mnemonic);
     setWalletAddresses(addresses);
+    addressesRef.current = addresses;
     await saveWalletToStorage(addresses, mnemonic);
     setSeedPhrase(mnemonic.split(' '));
-    const native = NATIVE_TOKEN_DEFS.map((d) => ({ ...d, balance: 0, balanceUSD: 0 }));
-    setTokens(native);
+    setTokens(buildInitialTokens());
     setIsWalletCreated(true);
     setIsLocked(false);
   }, []);
-
-  const refreshBalances = useCallback(() => {}, []);
 
   const addToken = useCallback((token: Token) => {
     setTokens((prev) => {
@@ -148,10 +214,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setPinState(null);
     setSeedPhrase([]);
     setWalletAddresses(null);
+    addressesRef.current = null;
     setTokens([]);
     setIsWalletCreated(false);
     setBiometricEnabledState(false);
     setIsLocked(false);
+    setPrices({});
+    setLastRefreshedAt(null);
   }, []);
 
   return (
@@ -173,7 +242,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         walletAddresses,
         initWallet,
         isLoadingBalances,
+        lastRefreshedAt,
         refreshBalances,
+        prices,
         biometricEnabled,
         setBiometricEnabled,
         autoLockTimer,
